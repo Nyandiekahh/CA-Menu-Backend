@@ -1,18 +1,51 @@
 from rest_framework import serializers
 from django.contrib.auth import authenticate
 from django.contrib.auth.password_validation import validate_password
-from .models import CustomUser, MealCategory, Meal, Order, OrderItem, Payment, EmailVerification
+from .models import (
+    CustomUser, MealCategory, Meal, Order, OrderItem, Payment, 
+    EmailVerification, Department, FreeMealDay
+)
 from decimal import Decimal
+from django.utils import timezone
+
+class DepartmentSerializer(serializers.ModelSerializer):
+    """Department serializer"""
+    employees_count = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = Department
+        fields = ('id', 'name', 'description', 'is_active', 'employees_count', 'created_at')
+        read_only_fields = ('created_at',)
+
+    def get_employees_count(self, obj):
+        return obj.customuser_set.filter(is_kitchen_admin=False).count()
+
+
+class FreeMealDaySerializer(serializers.ModelSerializer):
+    """Free meal day serializer"""
+    created_by_name = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = FreeMealDay
+        fields = ('id', 'date', 'reason', 'is_active', 'created_by_name', 'created_at')
+        read_only_fields = ('created_at',)
+
+    def get_created_by_name(self, obj):
+        if obj.created_by:
+            return f"{obj.created_by.first_name} {obj.created_by.last_name}"
+        return None
+
 
 class UserRegistrationSerializer(serializers.ModelSerializer):
     """User registration serializer"""
     password = serializers.CharField(write_only=True, validators=[validate_password])
     password_confirm = serializers.CharField(write_only=True)
+    department_name = serializers.CharField(source='department.name', read_only=True)
 
     class Meta:
         model = CustomUser
         fields = ('email', 'username', 'first_name', 'last_name', 'phone_number', 
-                 'employee_id', 'department', 'password', 'password_confirm')
+                 'employee_id', 'department', 'department_name', 'password', 'password_confirm')
 
     def validate(self, attrs):
         if attrs['password'] != attrs['password_confirm']:
@@ -51,11 +84,13 @@ class UserLoginSerializer(serializers.Serializer):
 
 class UserSerializer(serializers.ModelSerializer):
     """User profile serializer"""
+    department_name = serializers.CharField(source='department.name', read_only=True)
+    
     class Meta:
         model = CustomUser
         fields = ('id', 'email', 'username', 'first_name', 'last_name', 
-                 'phone_number', 'employee_id', 'department', 'is_kitchen_admin',
-                 'is_email_verified', 'date_joined')
+                 'phone_number', 'employee_id', 'department', 'department_name',
+                 'is_kitchen_admin', 'is_email_verified', 'date_joined')
         read_only_fields = ('id', 'email', 'is_kitchen_admin', 'is_email_verified', 'date_joined')
 
 
@@ -169,17 +204,102 @@ class OrderCreateSerializer(serializers.ModelSerializer):
         items_data = validated_data.pop('items')
         user = self.context['request'].user
         
-        # Calculate total
+        # Check if today is a free meal day
+        is_free_day = FreeMealDay.is_free_meal_day()
+        
+        # Calculate total (will be 0 if free meal day)
         total_amount = Decimal('0')
-        for item_data in items_data:
-            meal = item_data['meal']
-            quantity = item_data['quantity']
-            total_amount += meal.price * quantity
+        if not is_free_day:
+            for item_data in items_data:
+                meal = item_data['meal']
+                quantity = item_data['quantity']
+                total_amount += meal.price * quantity
         
         # Create order
         order = Order.objects.create(
             user=user,
             total_amount=total_amount,
+            is_free_meal=is_free_day,
+            status='free' if is_free_day else 'pending',
+            **validated_data
+        )
+        
+        # Create order items
+        for item_data in items_data:
+            OrderItem.objects.create(order=order, **item_data)
+        
+        # Update meal units if applicable
+        for item_data in items_data:
+            meal = item_data['meal']
+            if meal.units_available is not None:
+                meal.units_available -= item_data['quantity']
+                meal.save()
+        
+        return order
+
+
+class AdminOrderCreateSerializer(serializers.ModelSerializer):
+    """Admin order creation serializer for creating orders on behalf of users"""
+    items = OrderItemSerializer(many=True)
+    user_email = serializers.EmailField(write_only=True)
+
+    class Meta:
+        model = Order
+        fields = ('user_email', 'items', 'notes', 'admin_notes')
+
+    def validate_user_email(self, email):
+        try:
+            user = CustomUser.objects.get(email=email, is_kitchen_admin=False)
+            return user
+        except CustomUser.DoesNotExist:
+            raise serializers.ValidationError("User with this email does not exist or is an admin.")
+
+    def validate_items(self, items):
+        if not items:
+            raise serializers.ValidationError("At least one item is required.")
+        
+        for item_data in items:
+            meal = item_data['meal']
+            quantity = item_data['quantity']
+            
+            if not meal.is_available:
+                raise serializers.ValidationError(f"{meal.name} is not available.")
+            
+            if quantity > meal.max_per_person:
+                raise serializers.ValidationError(
+                    f"Maximum {meal.max_per_person} {meal.name} allowed per person."
+                )
+            
+            if meal.units_available is not None and quantity > meal.units_available:
+                raise serializers.ValidationError(
+                    f"Only {meal.units_available} units of {meal.name} available."
+                )
+        
+        return items
+
+    def create(self, validated_data):
+        items_data = validated_data.pop('items')
+        user_email = validated_data.pop('user_email')
+        admin_user = self.context['request'].user
+        
+        # Check if today is a free meal day
+        is_free_day = FreeMealDay.is_free_meal_day()
+        
+        # Calculate total
+        total_amount = Decimal('0')
+        if not is_free_day:
+            for item_data in items_data:
+                meal = item_data['meal']
+                quantity = item_data['quantity']
+                total_amount += meal.price * quantity
+        
+        # Create order
+        order = Order.objects.create(
+            user=user_email,  # user_email is actually the user object from validate_user_email
+            total_amount=total_amount,
+            is_free_meal=is_free_day,
+            status='free' if is_free_day else 'pending',
+            created_by_admin=admin_user,
             **validated_data
         )
         
@@ -202,17 +322,25 @@ class OrderSerializer(serializers.ModelSerializer):
     items = OrderItemSerializer(many=True, read_only=True)
     user_name = serializers.SerializerMethodField()
     user_email = serializers.CharField(source='user.email', read_only=True)
+    user_department = serializers.CharField(source='user.department.name', read_only=True)
     payment_info = serializers.SerializerMethodField()
+    created_by_admin_name = serializers.SerializerMethodField()
 
     class Meta:
         model = Order
-        fields = ('id', 'user_name', 'user_email', 'status', 'total_amount', 
-                 'items_count', 'items', 'payment_info', 'notes', 
+        fields = ('id', 'user_name', 'user_email', 'user_department', 'status', 
+                 'total_amount', 'is_free_meal', 'items_count', 'items', 'payment_info', 
+                 'notes', 'admin_notes', 'created_by_admin_name', 'is_admin_created',
                  'created_at', 'updated_at')
-        read_only_fields = ('total_amount', 'items_count')
+        read_only_fields = ('total_amount', 'items_count', 'is_free_meal', 'is_admin_created')
 
     def get_user_name(self, obj):
         return f"{obj.user.first_name} {obj.user.last_name}"
+
+    def get_created_by_admin_name(self, obj):
+        if obj.created_by_admin:
+            return f"{obj.created_by_admin.first_name} {obj.created_by_admin.last_name}"
+        return None
 
     def get_payment_info(self, obj):
         if hasattr(obj, 'payment'):
@@ -251,6 +379,11 @@ class PaymentSerializer(serializers.ModelSerializer):
         order = attrs.get('order')
         if hasattr(order, 'payment'):
             raise serializers.ValidationError("Payment already exists for this order.")
+        
+        # Check if it's a free meal order
+        if order.is_free_meal:
+            raise serializers.ValidationError("Cannot create payment for free meal orders.")
+        
         return attrs
 
     def create(self, validated_data):
@@ -285,3 +418,5 @@ class DashboardStatsSerializer(serializers.Serializer):
     pending_payments = serializers.IntegerField()
     active_meals = serializers.IntegerField()
     total_customers = serializers.IntegerField()
+    free_meal_orders_today = serializers.IntegerField()
+    admin_created_orders_today = serializers.IntegerField()

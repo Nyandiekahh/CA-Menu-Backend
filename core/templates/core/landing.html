@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ title }}</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+        }
+
+        .container {
+            text-align: center;
+            max-width: 800px;
+            padding: 2rem;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+        }
+
+        .logo {
+            width: 80px;
+            height: 80px;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 50%;
+            margin: 0 auto 2rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2rem;
+            font-weight: bold;
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            margin-bottom: 1rem;
+            background: linear-gradient(45deg, #fff, #f0f0f0);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .subtitle {
+            font-size: 1.2rem;
+            margin-bottom: 2rem;
+            opacity: 0.9;
+        }
+
+        .status-card {
+            background: rgba(255, 255, 255, 0.15);
+            border-radius: 15px;
+            padding: 1.5rem;
+            margin: 2rem 0;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .status-indicator {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            background: #4ade80;
+            border-radius: 50%;
+            margin-right: 0.5rem;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .links {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-top: 2rem;
+        }
+
+        .link-card {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            padding: 1rem;
+            text-decoration: none;
+            color: white;
+            transition: all 0.3s ease;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .link-card:hover {
+            background: rgba(255, 255, 255, 0.2);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+        }
+
+        .link-title {
+            font-weight: bold;
+            margin-bottom: 0.5rem;
+        }
+
+        .link-desc {
+            font-size: 0.9rem;
+            opacity: 0.8;
+        }
+
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            gap: 1rem;
+            margin-top: 1rem;
+        }
+
+        .stat {
+            text-align: center;
+        }
+
+        .stat-number {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: #4ade80;
+        }
+
+        .stat-label {
+            font-size: 0.9rem;
+            opacity: 0.8;
+        }
+
+        .footer {
+            margin-top: 2rem;
+            font-size: 0.9rem;
+            opacity: 0.7;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="logo">🍽️</div>
+        <h1>{{ title }}</h1>
+        <p class="subtitle">{{ description }}</p>
+        
+        <div class="status-card">
+            <div class="status-indicator"></div>
+            <strong>API Status: Online</strong>
+            <p style="margin-top: 0.5rem; opacity: 0.8;">All systems operational</p>
+            
+            <div class="stats" id="stats">
+                <div class="stat">
+                    <div class="stat-number">-</div>
+                    <div class="stat-label">Users</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-number">-</div>
+                    <div class="stat-label">Orders</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-number">-</div>
+                    <div class="stat-label">Active Meals</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-number">-</div>
+                    <div class="stat-label">Departments</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="links">
+            <a href="/api/status/" class="link-card">
+                <div class="link-title">📊 API Status</div>
+                <div class="link-desc">View detailed API health and statistics</div>
+            </a>
+            
+            <a href="/api/endpoints/" class="link-card">
+                <div class="link-title">📖 API Documentation</div>
+                <div class="link-desc">Browse all available endpoints</div>
+            </a>
+            
+            <a href="/admin/" class="link-card">
+                <div class="link-title">⚙️ Admin Panel</div>
+                <div class="link-desc">Access Django administration</div>
+            </a>
+            
+            <a href="/api/meals/" class="link-card">
+                <div class="link-title">🍽️ View Meals</div>
+                <div class="link-desc">Browse available meals (requires auth)</div>
+            </a>
+        </div>
+
+        <div class="footer">
+            <p>Communications Authority of Kenya &copy; 2025</p>
+            <p>Staff Portal API v{{ version }}</p>
+        </div>
+    </div>
+
+    <script>
+        // Load stats dynamically
+        fetch('/api/status/')
+            .then(response => response.json())
+            .then(data => {
+                if (data.stats) {
+                    const stats = document.querySelectorAll('.stat-number');
+                    stats[0].textContent = data.stats.users || '0';
+                    stats[1].textContent = data.stats.orders || '0';
+                    stats[2].textContent = data.stats.meals || '0';
+                    stats[3].textContent = data.stats.departments || '0';
+                }
+            })
+            .catch(error => {
+                console.log('Stats not available:', error);
+            });
+    </script>
+</body>
+</html>

@@ -5,14 +5,74 @@ from django.urls import reverse
 from django.utils.safestring import mark_safe
 from .models import (
     CustomUser, EmailVerification, MealCategory, Meal, 
-    Order, OrderItem, Payment, AdminNotification
+    Order, OrderItem, Payment, AdminNotification, Department, FreeMealDay
 )
+
+@admin.register(Department)
+class DepartmentAdmin(admin.ModelAdmin):
+    """Department Admin"""
+    list_display = ('name', 'employees_count', 'is_active', 'created_by_name', 'created_at')
+    list_filter = ('is_active', 'created_at')
+    search_fields = ('name', 'description')
+    ordering = ('name',)
+    readonly_fields = ('created_at',)
+
+    def employees_count(self, obj):
+        return obj.employees.filter(is_kitchen_admin=False).count()
+    employees_count.short_description = 'Number of Employees'
+
+    def created_by_name(self, obj):
+        return f"{obj.created_by.first_name} {obj.created_by.last_name}" if obj.created_by else "System"
+    created_by_name.short_description = 'Created By'
+
+    actions = ['activate_departments', 'deactivate_departments']
+
+    def activate_departments(self, request, queryset):
+        queryset.update(is_active=True)
+        self.message_user(request, f"{queryset.count()} departments activated.")
+    activate_departments.short_description = "Activate selected departments"
+
+    def deactivate_departments(self, request, queryset):
+        queryset.update(is_active=False)
+        self.message_user(request, f"{queryset.count()} departments deactivated.")
+    deactivate_departments.short_description = "Deactivate selected departments"
+
+
+@admin.register(FreeMealDay)
+class FreeMealDayAdmin(admin.ModelAdmin):
+    """Free Meal Day Admin"""
+    list_display = ('date', 'reason', 'is_active', 'orders_count', 'created_by_name', 'created_at')
+    list_filter = ('is_active', 'date', 'created_at')
+    search_fields = ('reason', 'date')
+    ordering = ('-date',)
+    readonly_fields = ('created_at',)
+
+    def orders_count(self, obj):
+        return obj.order_set.count() if hasattr(obj, 'order_set') else 0
+    orders_count.short_description = 'Orders on this day'
+
+    def created_by_name(self, obj):
+        return f"{obj.created_by.first_name} {obj.created_by.last_name}" if obj.created_by else "System"
+    created_by_name.short_description = 'Created By'
+
+    actions = ['activate_free_days', 'deactivate_free_days']
+
+    def activate_free_days(self, request, queryset):
+        queryset.update(is_active=True)
+        self.message_user(request, f"{queryset.count()} free meal days activated.")
+    activate_free_days.short_description = "Activate selected free meal days"
+
+    def deactivate_free_days(self, request, queryset):
+        queryset.update(is_active=False)
+        self.message_user(request, f"{queryset.count()} free meal days deactivated.")
+    deactivate_free_days.short_description = "Deactivate selected free meal days"
+
 
 @admin.register(CustomUser)
 class CustomUserAdmin(UserAdmin):
     """Custom User Admin"""
-    list_display = ('email', 'first_name', 'last_name', 'is_kitchen_admin', 'is_email_verified', 'date_joined')
-    list_filter = ('is_kitchen_admin', 'is_email_verified', 'is_active', 'date_joined')
+    list_display = ('email', 'first_name', 'last_name', 'department_name', 'is_kitchen_admin', 'is_email_verified', 'date_joined')
+    list_filter = ('is_kitchen_admin', 'is_email_verified', 'is_active', 'department', 'date_joined')
     search_fields = ('email', 'first_name', 'last_name', 'employee_id')
     ordering = ('-date_joined',)
     
@@ -27,6 +87,10 @@ class CustomUserAdmin(UserAdmin):
             'fields': ('email', 'first_name', 'last_name', 'is_kitchen_admin', 'phone_number', 'employee_id', 'department')
         }),
     )
+
+    def department_name(self, obj):
+        return obj.department.name if obj.department else "No Department"
+    department_name.short_description = 'Department'
 
     actions = ['make_kitchen_admin', 'remove_kitchen_admin', 'verify_email']
 
@@ -123,16 +187,21 @@ class OrderItemInline(admin.TabularInline):
 @admin.register(Order)
 class OrderAdmin(admin.ModelAdmin):
     """Order Admin"""
-    list_display = ('id', 'user_name', 'user_email', 'status', 'total_amount', 'items_count', 'payment_status', 'created_at')
-    list_filter = ('status', 'created_at')
-    search_fields = ('user__email', 'user__first_name', 'user__last_name')
-    readonly_fields = ('total_amount', 'created_at', 'updated_at')
+    list_display = ('id', 'user_name', 'user_email', 'user_department', 'status', 'total_amount', 
+                   'is_free_meal', 'items_count', 'payment_status', 'admin_created_indicator', 'created_at')
+    list_filter = ('status', 'is_free_meal', 'created_at', 'user__department', 'created_by_admin')
+    search_fields = ('user__email', 'user__first_name', 'user__last_name', 'id')
+    readonly_fields = ('total_amount', 'is_free_meal', 'created_at', 'updated_at')
     inlines = [OrderItemInline]
     ordering = ('-created_at',)
 
     fieldsets = (
         ('Order Information', {
-            'fields': ('user', 'status', 'total_amount', 'notes')
+            'fields': ('user', 'status', 'total_amount', 'is_free_meal', 'notes')
+        }),
+        ('Admin Information', {
+            'fields': ('created_by_admin', 'admin_notes'),
+            'classes': ('collapse',)
         }),
         ('Timestamps', {
             'fields': ('created_at', 'updated_at'),
@@ -148,8 +217,20 @@ class OrderAdmin(admin.ModelAdmin):
         return obj.user.email
     user_email.short_description = 'Customer Email'
 
+    def user_department(self, obj):
+        return obj.user.department.name if obj.user.department else "No Department"
+    user_department.short_description = 'Department'
+
+    def admin_created_indicator(self, obj):
+        if obj.created_by_admin:
+            return format_html('<span style="color: blue;">✓ Admin Created</span>')
+        return format_html('<span style="color: gray;">User Created</span>')
+    admin_created_indicator.short_description = 'Creation Type'
+
     def payment_status(self, obj):
-        if hasattr(obj, 'payment'):
+        if obj.is_free_meal:
+            return format_html('<span style="color: green;">Free Meal</span>')
+        elif hasattr(obj, 'payment'):
             if obj.payment.is_verified:
                 color = 'green'
                 status = 'Verified'
@@ -189,9 +270,10 @@ class OrderAdmin(admin.ModelAdmin):
 @admin.register(Payment)
 class PaymentAdmin(admin.ModelAdmin):
     """Payment Admin"""
-    list_display = ('order_id', 'customer_name', 'transaction_code', 'amount_paid', 'order_total', 'amount_remaining', 'is_verified', 'verification_status')
-    list_filter = ('is_verified', 'created_at')
-    search_fields = ('transaction_code', 'order__user__email', 'phone_number')
+    list_display = ('order_id', 'customer_name', 'customer_department', 'transaction_code', 
+                   'amount_paid', 'order_total', 'amount_remaining', 'is_verified', 'verification_status')
+    list_filter = ('is_verified', 'created_at', 'order__user__department')
+    search_fields = ('transaction_code', 'order__user__email', 'phone_number', 'order__id')
     readonly_fields = ('order', 'created_at', 'amount_remaining', 'is_fully_paid')
     ordering = ('-created_at',)
 
@@ -215,6 +297,10 @@ class PaymentAdmin(admin.ModelAdmin):
     def customer_name(self, obj):
         return f"{obj.order.user.first_name} {obj.order.user.last_name}"
     customer_name.short_description = 'Customer'
+
+    def customer_department(self, obj):
+        return obj.order.user.department.name if obj.order.user.department else "No Department"
+    customer_department.short_description = 'Department'
 
     def order_total(self, obj):
         return f"KSh {obj.order.total_amount}"
@@ -257,11 +343,21 @@ class PaymentAdmin(admin.ModelAdmin):
 @admin.register(AdminNotification)
 class AdminNotificationAdmin(admin.ModelAdmin):
     """Admin Notification"""
-    list_display = ('title', 'notification_type', 'is_read', 'created_at')
+    list_display = ('title', 'notification_type', 'is_read', 'related_info', 'created_at')
     list_filter = ('notification_type', 'is_read', 'created_at')
     search_fields = ('title', 'message')
     readonly_fields = ('created_at',)
     ordering = ('-created_at',)
+
+    def related_info(self, obj):
+        if obj.related_order:
+            return format_html('<a href="/admin/core/order/{}/change/">Order #{}</a>', 
+                             obj.related_order.id, obj.related_order.id)
+        elif obj.related_meal:
+            return format_html('<a href="/admin/core/meal/{}/change/">{}</a>', 
+                             obj.related_meal.id, obj.related_meal.name)
+        return "No related object"
+    related_info.short_description = 'Related'
 
     actions = ['mark_as_read', 'mark_as_unread']
 

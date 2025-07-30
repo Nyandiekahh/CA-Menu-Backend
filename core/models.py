@@ -4,6 +4,60 @@ from django.core.validators import MinValueValidator
 import random
 import string
 from decimal import Decimal
+from django.utils import timezone
+
+class Department(models.Model):
+    """Department model for CA Kenya"""
+    name = models.CharField(max_length=100, unique=True)
+    description = models.TextField(blank=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    created_by = models.ForeignKey(
+        'CustomUser', 
+        on_delete=models.SET_NULL, 
+        null=True, 
+        blank=True,
+        related_name='created_departments'  # This fixes the conflict
+    )
+
+    def __str__(self):
+        return self.name
+
+    class Meta:
+        verbose_name = "Department"
+        verbose_name_plural = "Departments"
+        ordering = ['name']
+
+
+class FreeMealDay(models.Model):
+    """Model to track days when meals are free (institution sponsored)"""
+    date = models.DateField(unique=True)
+    reason = models.CharField(max_length=200, help_text="Reason for free meals (e.g., Company sponsored lunch)")
+    is_active = models.BooleanField(default=True)
+    created_by = models.ForeignKey(
+        'CustomUser', 
+        on_delete=models.SET_NULL, 
+        null=True, 
+        blank=True,
+        related_name='created_free_meal_days'  # Clear related name
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Free meals on {self.date} - {self.reason}"
+
+    @classmethod
+    def is_free_meal_day(cls, date=None):
+        """Check if a given date (or today) is a free meal day"""
+        if date is None:
+            date = timezone.now().date()
+        return cls.objects.filter(date=date, is_active=True).exists()
+
+    class Meta:
+        verbose_name = "Free Meal Day"
+        verbose_name_plural = "Free Meal Days"
+        ordering = ['-date']
+
 
 class CustomUser(AbstractUser):
     """Custom User model with additional fields"""
@@ -11,7 +65,13 @@ class CustomUser(AbstractUser):
     is_kitchen_admin = models.BooleanField(default=False)
     phone_number = models.CharField(max_length=15, blank=True)
     employee_id = models.CharField(max_length=20, blank=True)
-    department = models.CharField(max_length=100, blank=True)
+    department = models.ForeignKey(
+        Department, 
+        on_delete=models.SET_NULL, 
+        null=True, 
+        blank=True,
+        related_name='employees'  # Clear related name for employees
+    )
     is_email_verified = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -104,14 +164,35 @@ class Order(models.Model):
         ('ready', 'Ready for Pickup'),
         ('completed', 'Completed'),
         ('cancelled', 'Cancelled'),
+        ('free', 'Free Meal (Institution Sponsored)'),  # New status for free meals
     ]
 
     user = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name='orders')
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
     total_amount = models.DecimalField(max_digits=10, decimal_places=2)
+    is_free_meal = models.BooleanField(default=False)  # Track if this is a free meal
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     notes = models.TextField(blank=True)
+    
+    # Track who created the order (for admin-assisted orders)
+    created_by_admin = models.ForeignKey(
+        CustomUser, 
+        on_delete=models.SET_NULL, 
+        null=True, 
+        blank=True,
+        related_name='admin_created_orders',
+        help_text="Admin who created this order on behalf of the user"
+    )
+    admin_notes = models.TextField(blank=True, help_text="Notes from admin when creating order for user")
+
+    def save(self, *args, **kwargs):
+        # Check if today is a free meal day
+        if FreeMealDay.is_free_meal_day(self.created_at.date() if self.created_at else timezone.now().date()):
+            self.is_free_meal = True
+            self.status = 'free'
+            self.total_amount = Decimal('0')
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"Order #{self.id} - {self.user.email} - KSh {self.total_amount}"
@@ -119,6 +200,10 @@ class Order(models.Model):
     @property
     def items_count(self):
         return self.items.aggregate(total=models.Sum('quantity'))['total'] or 0
+
+    @property
+    def is_admin_created(self):
+        return self.created_by_admin is not None
 
     class Meta:
         verbose_name = "Order"
@@ -136,6 +221,9 @@ class OrderItem(models.Model):
 
     def save(self, *args, **kwargs):
         self.price_per_item = self.meal.price
+        # If it's a free meal, set price to 0
+        if self.order.is_free_meal:
+            self.price_per_item = Decimal('0')
         self.subtotal = self.price_per_item * self.quantity
         super().save(*args, **kwargs)
 
@@ -188,6 +276,7 @@ class AdminNotification(models.Model):
         ('new_order', 'New Order'),
         ('payment_submitted', 'Payment Submitted'),
         ('low_stock', 'Low Stock Alert'),
+        ('admin_order_created', 'Admin Created Order'),  # New notification type
     ]
 
     notification_type = models.CharField(max_length=20, choices=NOTIFICATION_TYPES)
