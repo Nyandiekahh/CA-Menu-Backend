@@ -18,7 +18,8 @@ class DepartmentSerializer(serializers.ModelSerializer):
         read_only_fields = ('created_at',)
 
     def get_employees_count(self, obj):
-        return obj.customuser_set.filter(is_kitchen_admin=False).count()
+        # Fix: Use the correct related_name 'employees' instead of 'customuser_set'
+        return obj.employees.filter(is_kitchen_admin=False).count()
 
 
 class FreeMealDaySerializer(serializers.ModelSerializer):
@@ -172,7 +173,8 @@ class OrderCreateSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Order
-        fields = ('items', 'notes')
+        fields = ('id', 'items', 'notes', 'total_amount', 'is_free_meal', 'status', 'created_at')  # Added 'id' and other important fields
+        read_only_fields = ('id', 'total_amount', 'is_free_meal', 'status', 'created_at')  # Make these read-only
 
     def validate_items(self, items):
         if not items:
@@ -236,6 +238,19 @@ class OrderCreateSerializer(serializers.ModelSerializer):
                 meal.save()
         
         return order
+
+    def to_representation(self, instance):
+        """Override to include the full order data in response"""
+        representation = super().to_representation(instance)
+        
+        # Add the items with their full details
+        representation['items'] = OrderItemSerializer(
+            instance.items.all(), 
+            many=True, 
+            context=self.context
+        ).data
+        
+        return representation
 
 
 class AdminOrderCreateSerializer(serializers.ModelSerializer):
